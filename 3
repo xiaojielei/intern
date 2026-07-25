@@ -1,0 +1,70 @@
+def get_slides_placeholders(self) -> dict[int, list[tuple[object, str]]]:
+    """
+    Returns:
+    {
+        slide_no: [(ph_object, placeholder_name), ...]
+    }
+    Return placeholders sorted in TRUE visual order (top->bottom, left->right)
+    and rename them as PH1, PH2, ... in that order.
+    """
+    info = {}
+    for slide_no, slide in enumerate(self.prs.slides, start=1):
+        ph_items = []
+        for ph in slide.placeholders:
+            try:
+                top = int(ph.top)
+                left = int(ph.left)
+            except Exception:
+                top, left = 0, 0  # Fallback for rare positioning exceptions
+            
+            # Directly store the placeholder object instead of its idx
+            ph_items.append((top, left, ph))
+        
+        # Sort in visual order: top to bottom, then left to right
+        ph_items.sort(key=lambda x: (x[0], x[1]))
+        
+        # Assign sequential visual names (PH1, PH2, ...) and pair with the ph object
+        named = []
+        for i, (_, _, ph_obj) in enumerate(ph_items, start=1):
+            name = f"PH{i}"
+            named.append((ph_obj, name))
+            
+        info[slide_no] = named
+        
+    return info
+
+
+    import io
+
+def insert_image_to_ph(self, slide_no: int, ph_rank: int, img_bytes_or_stream):
+    """
+    Inserts an image into a specified placeholder based on visual rank.
+
+    :param slide_no: Page number (1-based index)
+    :param ph_rank: Visual rank of the placeholder (1 for PH1, 2 for PH2, etc.)
+    :param img_bytes_or_stream: Raw bytes or BytesIO stream of the image
+    """
+    # 1. Normalize image input stream and reset pointer
+    if isinstance(img_bytes_or_stream, bytes):
+        stream = io.BytesIO(img_bytes_or_stream)
+    else:
+        stream = img_bytes_or_stream
+        stream.seek(0)
+
+    slide = self.prs.slides[slide_no - 1]
+    placeholders_info = self.get_slides_placeholders()
+    
+    # 2. Retrieve the exact target placeholder object using ph_rank
+    target_ph, ph_name = placeholders_info[slide_no][ph_rank - 1]
+    
+    print(f"Inserting image into Slide {slide_no} -> {ph_name}...")
+
+    # 3. Read target placeholder position and dimensions
+    left, top, width, height = target_ph.left, target_ph.top, target_ph.width, target_ph.height
+    
+    # 4. Remove original placeholder element to prevent overlapping
+    sp = target_ph._element
+    sp.getparent().remove(sp)
+    
+    # 5. Insert image fitting the exact bounding box of the placeholder
+    slide.shapes.add_picture(stream, left, top, width=width, height=height)
