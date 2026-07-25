@@ -36,35 +36,48 @@ def get_slides_placeholders(self) -> dict[int, list[tuple[object, str]]]:
 
     import io
 
+import io
+
 def insert_image_to_ph(self, slide_no: int, ph_rank: int, img_bytes_or_stream):
     """
     Inserts an image into a specified placeholder based on visual rank.
+    If an image already exists at the specified position, execution is skipped.
 
     :param slide_no: Page number (1-based index)
     :param ph_rank: Visual rank of the placeholder (1 for PH1, 2 for PH2, etc.)
     :param img_bytes_or_stream: Raw bytes or BytesIO stream of the image
     """
-    # 1. Normalize image input stream and reset pointer
+    slide = self.prs.slides[slide_no - 1]
+    
+    # Unique tag to mark the image inserted at this specific position
+    target_tag = f"DYNAMIC_IMG_SLIDE_{slide_no}_PH_{ph_rank}"
+
+    # 1. Check if an image already exists at this target position
+    for shape in slide.shapes:
+        if shape.name == target_tag:
+            print(f"Skipping: Image already exists at Slide {slide_no} -> Position {ph_rank}.")
+            return  # Stop execution directly if already populated
+
+    # 2. Normalize image input stream and reset pointer
     if isinstance(img_bytes_or_stream, bytes):
         stream = io.BytesIO(img_bytes_or_stream)
     else:
         stream = img_bytes_or_stream
         stream.seek(0)
 
-    slide = self.prs.slides[slide_no - 1]
+    # 3. Retrieve bounding box coordinates from the target placeholder
     placeholders_info = self.get_slides_placeholders()
-    
-    # 2. Retrieve the exact target placeholder object using ph_rank
     target_ph, ph_name = placeholders_info[slide_no][ph_rank - 1]
-    
-    print(f"Inserting image into Slide {slide_no} -> {ph_name}...")
-
-    # 3. Read target placeholder position and dimensions
     left, top, width, height = target_ph.left, target_ph.top, target_ph.width, target_ph.height
-    
-    # 4. Remove original placeholder element to prevent overlapping
+
+    # 4. Remove original blank placeholder shape
     sp = target_ph._element
     sp.getparent().remove(sp)
+
+    # 5. Insert the new high-resolution image
+    new_picture = slide.shapes.add_picture(stream, left, top, width=width, height=height)
     
-    # 5. Insert image fitting the exact bounding box of the placeholder
-    slide.shapes.add_picture(stream, left, top, width=width, height=height)
+    # 6. Mark the picture with our target tag for future checks
+    new_picture.name = target_tag
+    
+    print(f"Successfully inserted image into Slide {slide_no} -> Position {ph_rank} ({ph_name})")
