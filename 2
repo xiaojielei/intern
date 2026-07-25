@@ -1,0 +1,15 @@
+# 在 ReportTab 类中添加此方法
+def insert_image_to_ph(self, slide_no: int, ph_rank: int, img_bytes_or_stream):
+    """
+    slide_no: 页码（从 1 开始）
+    ph_rank: 视觉排序第几个占位符（从 1 开始，对应 PH1, PH2...）
+    """
+    slide = self.prs.slides[slide_no - 1]
+    placeholders_info = self.get_slides_placeholders()
+    
+    # 获取对应视觉顺序的 idx
+    target_idx = placeholders_info[slide_no][ph_rank - 1][0]
+    
+    # 插入图片
+    ph = slide.placeholders[target_idx]
+    ph.insert_picture(img_bytes_or_stream)
