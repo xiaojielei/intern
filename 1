@@ -1,0 +1,52 @@
+import io
+import pyqtgraph as pg
+import pyqtgraph.exporters as exporters
+from PyQt6.QtCore import QBuffer, QIODevice
+from PyQt6.QtGui import QImage, QPixmap
+
+def grab_all_plots_from_layout(graphics_layout_widget, resolution_width=1600) -> dict:
+    """
+    遍历 GraphicsLayoutWidget 中的每一个子图 (PlotItem)，独立抓取并转化为内存图片字节流。
+
+    :param graphics_layout_widget: pg.GraphicsLayoutWidget 实例
+    :param resolution_width: 导出单张图的高清宽度（像素）
+    :return: 字典 {'plot_0_0': BytesIO, 'plot_0_1': BytesIO, ...}
+    """
+    image_bytes_dict = {}
+    layout = graphics_layout_widget.ci  # 获取内部的 GraphicsLayout 实例
+
+    # 获取网格布局的行数和列数
+    rows = layout.layout.rowCount()
+    cols = layout.layout.columnCount()
+
+    for r in range(rows):
+        for c in range(cols):
+            # 获取当前位置的 Item
+            item = layout.getItem(r, c)
+
+            # 只处理 PlotItem 类型的对象（避开空单元格或 LabelItem）
+            if isinstance(item, pg.PlotItem):
+                # ------------------- 核心导出 API -------------------
+                # 1. 创建该 PlotItem 的导出器
+                exporter = exporters.ImageExporter(item)
+
+                # 2. 设置分辨率（提升导出到 PPT 的清晰度）
+                exporter.parameters()['width'] = resolution_width
+
+                # 3. 导出为 QImage 对象 (在内存中，不落盘)
+                qimage: QImage = exporter.export(fileName=None)
+
+                # 4. 将 QImage 转为 PPT 要求的 io.BytesIO 内存流
+                pixmap = QPixmap.fromImage(qimage)
+                qbuffer = QBuffer()
+                qbuffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                pixmap.save(qbuffer, "PNG")
+
+                bytes_io = io.BytesIO(qbuffer.data().data())
+                bytes_io.seek(0)
+
+                # 5. 保存到字典，Key 可以根据坐标命名
+                chart_key = f"plot_{r}_{c}"
+                image_bytes_dict[chart_key] = bytes_io
+
+    return image_bytes_dict
