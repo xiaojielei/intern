@@ -38,46 +38,60 @@ def get_slides_placeholders(self) -> dict[int, list[tuple[object, str]]]:
 
 import io
 
+import io
+
+# Define a set on the class or module level to track filled placeholders in memory
+# (Add this attribute in ReportTab.__init__: self._inserted_tags = set())
+
 def insert_image_to_ph(self, slide_no: int, ph_rank: int, img_bytes_or_stream):
     """
     Inserts an image into a specified placeholder based on visual rank.
-    If an image already exists at the specified position, execution is skipped.
+    Uses double-check lock to ensure an image is inserted EXACTLY ONCE per target position.
 
     :param slide_no: Page number (1-based index)
     :param ph_rank: Visual rank of the placeholder (1 for PH1, 2 for PH2, etc.)
     :param img_bytes_or_stream: Raw bytes or BytesIO stream of the image
     """
+    # Initialize the memory tracker if it doesn't exist
+    if not hasattr(self, '_inserted_tags'):
+        self._inserted_tags = set()
+
     slide = self.prs.slides[slide_no - 1]
-    
-    # Unique tag to mark the image inserted at this specific position
     target_tag = f"DYNAMIC_IMG_SLIDE_{slide_no}_PH_{ph_rank}"
 
-    # 1. Check if an image already exists at this target position
+    # --- Lock Check 1: In-Memory Fast Intercept ---
+    if target_tag in self._inserted_tags:
+        print(f"[Intercepted] Position Slide {slide_no} -> PH{ph_rank} is already filled (Memory Check).")
+        return
+
+    # --- Lock Check 2: PowerPoint Shape Tree Check ---
     for shape in slide.shapes:
         if shape.name == target_tag:
-            print(f"Skipping: Image already exists at Slide {slide_no} -> Position {ph_rank}.")
-            return  # Stop execution directly if already populated
+            self._inserted_tags.add(target_tag)  # Sync memory state
+            print(f"[Intercepted] Position Slide {slide_no} -> PH{ph_rank} is already filled (Shape Check).")
+            return
 
-    # 2. Normalize image input stream and reset pointer
+    # 1. Normalize image input stream and reset pointer
     if isinstance(img_bytes_or_stream, bytes):
         stream = io.BytesIO(img_bytes_or_stream)
     else:
         stream = img_bytes_or_stream
         stream.seek(0)
 
-    # 3. Retrieve bounding box coordinates from the target placeholder
+    # 2. Retrieve bounding box coordinates from target placeholder
     placeholders_info = self.get_slides_placeholders()
     target_ph, ph_name = placeholders_info[slide_no][ph_rank - 1]
     left, top, width, height = target_ph.left, target_ph.top, target_ph.width, target_ph.height
 
-    # 4. Remove original blank placeholder shape
+    # 3. Remove original blank placeholder shape
     sp = target_ph._element
     sp.getparent().remove(sp)
 
-    # 5. Insert the new high-resolution image
+    # 4. Insert the new high-resolution image
     new_picture = slide.shapes.add_picture(stream, left, top, width=width, height=height)
-    
-    # 6. Mark the picture with our target tag for future checks
     new_picture.name = target_tag
-    
+
+    # 5. Lock this position immediately in memory to block any duplicate calls
+    self._inserted_tags.add(target_tag)
+
     print(f"Successfully inserted image into Slide {slide_no} -> Position {ph_rank} ({ph_name})")
