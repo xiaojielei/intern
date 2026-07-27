@@ -1,0 +1,152 @@
+PyQtGraph ImageExporter 导出图片到PPT X轴标签错位/重叠问题完整解决方案
+ 
+核心原因
+ 
+1. ImageExporter 默认截图裁剪、DPI、边距计算缺陷：导出时坐标轴标签、底部label的布局边距被压缩，绘图区域边界计算不准，文字和坐标轴挤在一起；
+2.  pptx  插入图片默认拉伸、缩放失真，进一步挤压底部文字；
+3. PyQtGraph 内部 PlotItem 底部margin预留不足，导出图片时没有给X轴label预留足够空白区域。
+ 
+方案1：绘图层面提前加大底部边距（根治错位，优先用）
+ 
+给 PlotItem 手动扩充底部留白，保证X轴label、标题不会被裁、不会贴坐标轴：
+ 
+python
+  
+import pyqtgraph as pg
+
+plot = pg.PlotItem()
+# 四个边距：left, top, right, bottom
+# 增大bottom值，给X轴标签预留大量底部空间
+plot.setContentsMargins(30, 20, 20, 60)
+
+# 设置X轴label
+plot.setLabel("bottom", "X轴名称", units="mm")
+# 可选：加大坐标轴文字间距
+plot.getAxis("bottom").setHeight(40)
+ 
+ 
+-  setContentsMargins  第四个参数bottom调大（40~80按需），导出图片底部会多出空白，PPT里不会挤在一起；
+-  getAxis("bottom").setHeight(40)  单独增加X轴坐标轴组件自身高度，分离刻度和文字。
+ 
+方案2：ImageExporter 导出配置修正，避免裁剪失真
+ 
+导出时手动指定尺寸、DPI，关闭自动裁剪，强制保留边距：
+ 
+python
+  
+from pyqtgraph.exporters import ImageExporter
+
+# glw = GraphicsLayoutWidget()
+exporter = ImageExporter(glw.scene())
+# 1. 设置高DPI，文字不会压缩变形
+exporter.parameters()['dpi'] = 300
+# 2. 固定导出画布尺寸，不要自适应裁剪
+exporter.parameters()['width'] = 1200
+exporter.parameters()['height'] = 800
+# 关键：禁用自动裁剪（autoCrop会切掉底部留白，导致label上移）
+exporter.parameters()['autoCrop'] = False
+
+# 导出临时图片文件
+exporter.export("temp_plot.png")
+ 
+ 
+重点： autoCrop=False  必须加！默认True会自动裁掉四周空白，直接把底部X标签压到坐标轴上，是错位头号元凶。
+ 
+方案3：pptx 插入图片禁止拉伸，避免压缩变形
+ 
+插入PPT图片时，不要强制拉伸铺满框，保持原图比例，否则纵向压缩会挤掉底部文字：
+ 
+python
+  
+from pptx import Presentation
+from pptx.util import Inches
+
+prs = Presentation()
+slide = prs.slides.add_slide(prs.slide_layouts[5])
+
+# 插入图片，统一固定尺寸，不拉伸
+img_path = "temp_plot.png"
+left = Inches(1)
+top = Inches(1)
+# 按原图宽高比例设置，不要强行拉宽高
+pic = slide.shapes.add_picture(img_path, left, top, width=Inches(8))
+# add_picture只传width会自动等比例算height，不会纵向挤压图片
+ 
+ 
+错误写法（会压缩纵向，label错位）：
+ 
+python
+  
+# 不要同时指定宽高强行拉伸！
+slide.shapes.add_picture(img_path, left, top, width=Inches(8), height=Inches(4))
+ 
+ 
+方案4：兜底补救：导出后图片底部追加空白（前面无效再用）
+ 
+如果调整margin还是不够，用PIL给导出图片底部补空白区域：
+ 
+python
+  
+from PIL import Image
+
+img = Image.open("temp_plot.png")
+w, h = img.size
+# 向下扩充120像素空白
+new_h = h + 120
+new_img = Image.new("RGB", (w, new_h), "white")
+new_img.paste(img, (0, 0))
+new_img.save("fixed_plot.png")
+# 再把fixed_plot.png插入PPT
+ 
+ 
+完整可运行整合示例
+ 
+python
+  
+import pyqtgraph as pg
+from pyqtgraph.exporters import ImageExporter
+from pptx import Presentation
+from pptx.util import Inches
+from PIL import Image
+
+# 1. 创建绘图控件
+glw = pg.GraphicsLayoutWidget()
+plot = glw.addPlot()
+# 扩充底部边距，解决标签挤压
+plot.setContentsMargins(40, 20, 20, 70)
+plot.getAxis("bottom").setHeight(45)
+plot.setLabel("bottom", "测试X轴", units="Hz")
+plot.plot([1,2,3], [2,4,1])
+
+# 2. 导出图片，关闭自动裁剪
+exporter = ImageExporter(glw.scene())
+exporter.params["dpi"] = 300
+exporter.params["width"] = 1400
+exporter.params["height"] = 900
+exporter.params["autoCrop"] = False
+exporter.export("temp.png")
+
+# 3. PIL兜底补底部空白
+img = Image.open("temp.png")
+w, h = img.size
+new_img = Image.new("RGB", (w, h + 100), "white")
+new_img.paste(img, (0, 0))
+new_img.save("fixed.png")
+
+# 4. 写入PPT，等比例插入不拉伸
+prs = Presentation()
+slide = prs.slides.add_slide(prs.slide_layouts[5])
+slide.shapes.add_picture("fixed.png", Inches(0.5), Inches(0.5), width=Inches(9))
+prs.save("output.pptx")
+print("PPT生成完成")
+ 
+ 
+排查总结（按优先级）
+ 
+1. 导出  autoCrop=False ，关闭自动裁边（最关键）；
+2. PlotItem 加大底部  setContentsMargins(..., bottom=60+) ；
+3. X轴单独加高  getAxis("bottom").setHeight() ；
+4. pptx 插入图片只给宽度，自动等比例高度，禁止强行拉伸；
+5. PIL二次补底部空白兜底。
+ 
+做完这几步，X轴label会稳定保持在图片最下方，不会和坐标轴重叠、错位。
