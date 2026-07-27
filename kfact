@@ -1,0 +1,90 @@
+def collect_series_for_ppt_target_cols(self):
+    """
+    仅提取列名为 "ABS.R" 和 "norm.T" 的曲线数据，
+    临时修改chosen_col_index，收集完成自动还原，不影响界面勾选
+    """
+    target_col_names = {"ABS.R", "norm.T"}  # 你要固定画的两列
+    out = []
+    basis = self.combo_basis.currentText()
+
+    for idx, m in enumerate(self.files):
+        if not m.include:
+            continue
+        
+        # 1. 备份用户原本勾选的列下标，结束后还原
+        original_chosen_idx = m.chosen_col_index
+        
+        # 2. 找到目标列在当前文件columns里的下标
+        temp_selected = []
+        for col_idx, col_name in enumerate(m.columns):
+            if col_name in target_col_names:
+                temp_selected.append(col_idx)
+        m.chosen_col_index = temp_selected
+
+        # 如果当前文件没有这两列，直接恢复原值跳过
+        if not temp_selected:
+            m.chosen_col_index = original_chosen_idx
+            continue
+
+        # ========== 下面完全复用 _collect_selected_series 原有采集逻辑 ==========
+        irr_test = self._get_site_irradiance(idx)
+        if m.irr_linked and irr_test is not None:
+            pass
+
+        if basis.startswith("Fluence"):
+            irradiance = float(m.fluence_Jcm2 or 0.0)
+        else:
+            irradiance = float(m.irradiance_Wcm2 or 0.0)
+
+        if irradiance <= 0:
+            m.chosen_col_index = original_chosen_idx
+            continue
+        
+        series_list = m.chosen_series()
+        if not series_list:
+            m.chosen_col_index = original_chosen_idx
+            continue
+
+        for cname, y in series_list:
+            y = np.asarray(y, dtype=float)
+            mask = np.isfinite(m.time) & np.isfinite(y)
+            t = m.time[mask]
+            y = y[mask]
+            if len(t) < 3:
+                continue
+            
+            t_years = self._to_years(t, m.time_unit)
+            if self.chk_minus_initial.isChecked():
+                y_minus_initial = y - y[0]
+            else:
+                y_minus_initial = y
+
+            label = f"{os.path.basename(m.path)}[{cname}]"
+            kind = self._classify_RT(cname)
+            if kind is None:
+                continue
+            out.append((idx, label, kind, irradiance, t_years, y_minus_initial))
+        # ======================================================================
+
+        # 3. 关键：恢复用户原本的勾选状态，界面checkbox不受任何影响
+        m.chosen_col_index = original_chosen_idx
+
+    return out
+
+def _plot_custom_series(self, series):
+    # 清空画布
+    for p in (self.plot_R, self.plot_T):
+        p.clearPlots()
+    
+    kR = float(self.spin_kR.value())
+    kT = float(self.spin_kT.value())
+    use_irradiance = float(self.spin_use_irr.value())
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
+
+    for i, (site_idx, label, kind, irradiance_i, t_years, y) in enumerate(series):
+        t_scaled = t_years * ((irradiance_i / use_irradiance) ** (kR if kind=="R" else kT))
+        pen = pg.mkPen(color=colors[i % len(colors)], width=1.8)
+        if kind == "R":
+            self.plot_R.plot(t_scaled, y, pen=pen, name=label)
+        else:
+            self.plot_T.plot(t_scaled, y, pen=pen, name=label)
