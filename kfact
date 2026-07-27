@@ -1,9 +1,8 @@
-def collect_series_for_ppt_target_cols(self):
+def collect_series_for_ppt_single_col(self, target_col: str):
     """
-    仅提取列名为 "ABS.R" 和 "norm.T" 的曲线数据，
-    临时修改chosen_col_index，收集完成自动还原，不影响界面勾选
+    仅提取指定单列数据，临时修改chosen_col_index，结束自动还原，不改动界面勾选
+    :param target_col: 只能传 "ABS.R" 或 "norm.T"
     """
-    target_col_names = {"ABS.R", "norm.T"}  # 你要固定画的两列
     out = []
     basis = self.combo_basis.currentText()
 
@@ -11,22 +10,22 @@ def collect_series_for_ppt_target_cols(self):
         if not m.include:
             continue
         
-        # 1. 备份用户原本勾选的列下标，结束后还原
+        # 备份用户原本勾选的列下标，处理完必须还原
         original_chosen_idx = m.chosen_col_index
-        
-        # 2. 找到目标列在当前文件columns里的下标
+
+        # 找到目标列的下标（只匹配传入的那1列）
         temp_selected = []
         for col_idx, col_name in enumerate(m.columns):
-            if col_name in target_col_names:
+            if col_name == target_col:
                 temp_selected.append(col_idx)
         m.chosen_col_index = temp_selected
 
-        # 如果当前文件没有这两列，直接恢复原值跳过
+        # 当前文件不存在目标列，直接恢复并跳过
         if not temp_selected:
             m.chosen_col_index = original_chosen_idx
             continue
 
-        # ========== 下面完全复用 _collect_selected_series 原有采集逻辑 ==========
+        # 复用原有数据采集逻辑（和_collect_selected_series完全一致）
         irr_test = self._get_site_irradiance(idx)
         if m.irr_linked and irr_test is not None:
             pass
@@ -64,27 +63,45 @@ def collect_series_for_ppt_target_cols(self):
             if kind is None:
                 continue
             out.append((idx, label, kind, irradiance, t_years, y_minus_initial))
-        # ======================================================================
 
-        # 3. 关键：恢复用户原本的勾选状态，界面checkbox不受任何影响
+        # 关键：恢复用户原本勾选状态，界面checkbox无变化
         m.chosen_col_index = original_chosen_idx
 
     return out
 
-def _plot_custom_series(self, series):
-    # 清空画布
-    for p in (self.plot_R, self.plot_T):
-        p.clearPlots()
-    
+def _plot_single_target_curve(self, series_data):
+    # 清空绘图面板
+    self.plot_R.clearPlots()
+    self.plot_T.clearPlots()
+
     kR = float(self.spin_kR.value())
     kT = float(self.spin_kT.value())
     use_irradiance = float(self.spin_use_irr.value())
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
 
-    for i, (site_idx, label, kind, irradiance_i, t_years, y) in enumerate(series):
-        t_scaled = t_years * ((irradiance_i / use_irradiance) ** (kR if kind=="R" else kT))
+    for i, (site_idx, label, kind, irradiance_i, t_years, y) in enumerate(series_data):
+        t_scaled = t_years * ((irradiance_i / use_irradiance) ** (kR if kind == "R" else kT))
         pen = pg.mkPen(color=colors[i % len(colors)], width=1.8)
         if kind == "R":
             self.plot_R.plot(t_scaled, y, pen=pen, name=label)
         else:
             self.plot_T.plot(t_scaled, y, pen=pen, name=label)
+
+def export_ppt_abs_r(self):
+    # 1. 获取ABS.R单列数据
+    curve_data = self.collect_series_for_ppt_single_col("ABS.R")
+    if not curve_data:
+        return
+    
+    # 2. 备份界面当前绘图数据
+    original_series = self._collect_selected_series()
+    
+    # 3. 临时绘制目标曲线
+    self._plot_single_target_curve(curve_data)
+    pix = self.plot_R.grab()  # ABS.R是R类，取plot_R画布
+    
+    # 4. 恢复界面用户原本的图
+    self._plot_current_k()
+
+    # 5. pix 存入PPT逻辑...
+
