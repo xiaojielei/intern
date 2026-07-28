@@ -1,0 +1,37 @@
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+
+# 1. 创建演示文稿与空白幻灯片
+prs = Presentation()
+blank_layout = prs.slide_layouts[6]
+slide = prs.slides.add_slide(blank_layout)
+
+# 2. 在幻灯片中添加表格 (2行2列)
+rows, cols = 2, 2
+left, top, width, height = Inches(1), Inches(1), Inches(6), Inches(2)
+table_shape = slide.shapes.add_table(rows, cols, left, top, width, height)
+table = table_shape.table
+
+# 3. 获取第0行第0列的单元格
+cell = table.cell(0, 0)
+
+# 4. 填充字符
+cell.text = "自定义大小文本"
+
+# 5. 设置字体大小和样式
+# 方法 A：针对段落 (Paragraph) 设置字体样式
+paragraph = cell.text_frame.paragraphs[0]
+paragraph.font.size = Pt(20)                 # 设置字体大小为 20 磅
+paragraph.font.name = "Microsoft YaHei"      # 设置字体名称（如微软雅黑）
+paragraph.font.bold = True                   # 加粗
+paragraph.font.color.rgb = RGBColor(0, 102, 204) # 设置字体颜色
+
+# 方法 B：在已有文本追加并设置局部 Run 的字体大小
+run = paragraph.add_run()
+run.text = " (小号附注)"
+run.font.size = Pt(12)                       # 单独设置追加字符的字号大小
+run.font.color.rgb = RGBColor(128, 128, 128)
+
+# 保存文件
+prs.save("table_font_demo.pptx")
