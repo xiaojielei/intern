@@ -1,0 +1,73 @@
+def insert_image_to_page1(self):
+        parent_folder = Path(self.ed_folder.text().strip())
+        s_folders = SiteDataLocator.list_all_s_folders(parent_folder)[:4]
+
+        if not s_folders:
+            QMessageBox.warning(self, "No Sites", "No site folders found.")
+            return
+
+        search_tokens = {
+            1: ["0000", "0074"],
+            2: ["0000", "0059"],
+            3: ["0000", "1235"],
+            4: ["0000", "1235"],
+        }
+
+        failures = []
+
+        # 获取 PPT 第一页及占位符信息
+        page1 = self.report_tab.prs.slides[0]
+        placeholder_info = self.report_tab.get_slides_placeholders()
+        page1_ph = placeholder_info[0]
+
+        for site_idx, s_dir in enumerate(s_folders, start=1):
+            try:
+                raw_data_dir = SiteDataLocator.find_raw_data_folder(s_dir)
+                if raw_data_dir is None:
+                    failures.append(f"{s_dir.name}: Raw Data folder not found")
+                    continue
+
+                required_tokens = search_tokens.get(site_idx, [])
+
+                # 遍历当前站点需要的每一个 token (例如 idx=0 是第一张图，idx=1 是第二张图)
+                for i, token in enumerate(required_tokens):
+                    # 计算该图片应该对应的 PH 编号 (例如 Site1 的第1张是 PH2, 第2张是 PH3)
+                    ph_num = 2 + (site_idx - 1) * 2 + i
+
+                    # 1. 寻找图片
+                    target_img_path = SiteDataLocator.find_target_image(
+                        raw_data_dir, 
+                        token
+                    )
+                    if target_img_path is None:
+                        failures.append(f"{s_dir.name}: image containing '{token}' not found (PH{ph_num} skipped)")
+                        continue  # 【找不到这张图片，直接跳过这张，继续找下一张】
+
+                    # 2. 寻找对应的占位符
+                    target_ph_tuple = next(
+                        (x for x in page1_ph if x[1] == f"PH{ph_num}"), None
+                    )
+                    if target_ph_tuple is None:
+                        failures.append(f"{s_dir.name}: PH{ph_num} not found in PPT slide")
+                        continue  # 【找不到占位符，跳过】
+
+                    # 3. 插入图片
+                    target_ph_idx = target_ph_tuple[0]
+                    target_ph_object = page1.placeholders[target_ph_idx]
+                    target_ph_object.insert_picture(str(target_img_path))
+
+            except Exception as e:
+                # 如果某个 site 发生未预期的代码报错，记录下来并继续处理下一个 site
+                failures.append(f"{s_dir.name}: Error occurred - {e}")
+                continue
+
+        # 所有站点处理完后，统一保存 PPT
+        try:
+            self.report_tab.prs.save(self.report_tab.pptx_path)
+            print("Successfully finished processing page 1")
+        except Exception as e:
+            QMessageBox.warning(self, "Save failed", f"Could not save:\n{e}")
+
+        # 如果有失败记录，在控制台输出
+        if failures:
+            print("Failures encountered during processing:", failures)
