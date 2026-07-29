@@ -1,0 +1,107 @@
+def insert_image_to_page1(self):
+    # helper for page1
+    """
+    Site1 -> 0000 + 0074 (0074 -> 6.17*3600/300)
+    Site2 -> 0000 + 0059
+    Site3 -> 0000 + 1235
+    Site4 -> 0000 + 1235
+    Ignore Site5+.
+    """
+    parent_folder = Path(self.ed_folder.text().strip())
+    s_folders = SiteDataLocator.list_all_s_folders(parent_folder)[:4]
+
+    if not s_folders:
+        QMessageBox.warning(
+            self, title="No Sites", text="No site folders found."
+        )
+        return
+
+    search_tokens = {
+        1: ["0000", "0074"],
+        2: ["0000", "0059"],
+        3: ["0000", "1235"],
+        4: ["0000", "1235"],
+    }
+
+    failures = []
+
+    # ========== 改动1：外层大try-except放到循环内部，单个站点异常不阻断全部 ==========
+    for site_idx, s_dir in enumerate(s_folders, start=1):
+        try:
+            raw_data_dir = SiteDataLocator.find_raw_data_folder(s_dir)
+            if raw_data_dir is None:
+                failures.append(f"{s_dir.name}: Raw Data folder not found")
+                # 仅跳过当前站点，继续下一个站点
+                continue
+
+            required_tokens = search_tokens[site_idx]
+            found_images: list[Path] = []
+
+            # ========== 改动2：单张图片查找单独try，缺图只跳过单张，不阻断整个站点 ==========
+            for token in required_tokens:
+                try:
+                    target_img_path = SiteDataLocator.find_target_image(
+                        raw_data_dir,
+                        token
+                    )
+                except Exception as e:
+                    failures.append(f"{s_dir.name} token[{token}]: lookup error {str(e)}")
+                    continue
+
+                if target_img_path is None:
+                    # 仅记录缺失，不终止当前站点，这里先存空标记，后面过滤
+                    failures.append(f"{s_dir.name}: image containing '{token}' not found")
+                    found_images.append(None)
+                else:
+                    found_images.append(target_img_path)
+
+            # 过滤掉没找到的图片，只保留存在的图片路径
+            valid_images = [img for img in found_images if img is not None]
+            if not valid_images:
+                failures.append(f"{s_dir.name}: No valid target images found for this site")
+                continue
+
+            # 读取PPT页面占位符（每个站点只读取一次，不要循环重复读）
+            page1 = self.report_tab.prs.slides[0]
+            placeholder_info = self.report_tab.get_slides_placeholders()
+            page1_ph: list[tuple[int, str]] = placeholder_info[0]
+
+            # ========== 改动3：单张图片插入单独try，一张失败不影响同站点其他图 ==========
+            for i, img_path in enumerate(valid_images, start=0):
+                ph_num = 2 + (site_idx - 1) * 2 + i
+                # 查找对应占位符
+                target_ph_tuple = next(
+                    (x for x in page1_ph if x[1] == f"PH{ph_num}"), None
+                )
+                if target_ph_tuple is None:
+                    failures.append(f"{s_dir.name}: PH{ph_num} not found")
+                    continue
+
+                target_ph_idx = target_ph_tuple[0]
+                target_ph_object = page1.placeholders[target_ph_idx]
+
+                # 单张图片插入单独捕获异常
+                try:
+                    target_ph_object.insert_picture(img_path)
+                except Exception as e:
+                    failures.append(f"{s_dir.name} img[{img_path.name}]: insert failed {str(e)}")
+                    continue
+
+                # 单张插入成功后再保存，避免一次性大量插入最后保存崩溃
+                try:
+                    self.report_tab.prs.save(self.report_tab.pptx_path)
+                except Exception as e:
+                    QMessageBox.warning(self, title="Save failed", text=f"Could not save:\n{e}")
+                    return
+
+            print(f"Successfully inserted valid images for {s_dir.name} to page 1")
+
+        # 单个站点整体异常捕获，只记录，继续下一个站点
+        except Exception as e:
+            failures.append(f"{s_dir.name}: site global error: {str(e)}")
+
+    # 全部站点循环结束后统一打印失败日志
+    if failures:
+        print("===== Insert Fail List =====")
+        for err in failures:
+            print(err)
