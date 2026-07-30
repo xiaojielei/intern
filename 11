@@ -1,0 +1,55 @@
+from pptx import Presentation
+
+def replace_target_textbox(slide_index: int, ppt_path: str, search_key: str, new_full_text: str, save_path: str):
+    """
+    slide_index: 页码，从0开始（第1页=0）
+    search_key: 用来定位文本框的特定字符串
+    new_full_text: 替换后整框的新文字
+    """
+    prs = Presentation(ppt_path)
+    slide = prs.slides[slide_index]
+
+    target_shape = None
+    # 遍历页面所有形状，匹配包含关键词的文本框
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        box_text = shape.text_frame.text
+        if search_key in box_text:
+            target_shape = shape
+            break  # 找到第一个匹配的就停止
+    
+    if target_shape is None:
+        print(f"第{slide_index+1}页未找到包含「{search_key}」的文本框")
+        prs.save(save_path)
+        return
+
+    # 清空原有文字，保留原段落格式写入新文本
+    tf = target_shape.text_frame
+    para = tf.paragraphs[0]
+    # 删除原有所有文字片段run
+    for run in list(para.runs):
+        para._p.remove(run._r)
+    # 写入全新字符串
+    para.add_run().text = new_full_text
+    print(f"已匹配关键词「{search_key}」，文本框更新为：{new_full_text}")
+
+    prs.save(save_path)
+    print(f"文件保存至：{save_path}")
+
+
+# 调用示例
+if __name__ == "__main__":
+    INPUT = "demo.pptx"
+    OUTPUT = "output.pptx"
+    PAGE = 0
+    KEYWORD = "待替换标识文字"  # 用来搜索定位文本框的字符串
+    NEW_TEXT = "这里是替换后的完整内容"
+
+    replace_target_textbox(
+        slide_index=PAGE,
+        ppt_path=INPUT,
+        search_key=KEYWORD,
+        new_full_text=NEW_TEXT,
+        save_path=OUTPUT
+    )
