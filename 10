@@ -1,0 +1,45 @@
+from pptx import Presentation
+
+def replace_text_in_pptx(pptx_path, target_str, old_part, new_part, output_path):
+    # 打开PPT文件
+    prs = Presentation(pptx_path)
+
+    # 遍历每一页幻灯片
+    for slide in prs.slides:
+        # 遍历当前页所有形状
+        for shape in slide.shapes:
+            # 判断是否是文本框（有文字内容的形状）
+            if not shape.has_text_frame:
+                continue
+            
+            text_frame = shape.text_frame
+            full_text = text_frame.text
+
+            # 判断文本框是否包含目标字符串
+            if target_str in full_text:
+                print(f"找到匹配文本框，原文：{full_text}")
+                # 逐段落、逐run替换（直接改text_frame.text会丢失格式）
+                for paragraph in text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        # 替换run内文字
+                        if old_part in run.text:
+                            run.text = run.text.replace(old_part, new_part)
+    
+    # 保存修改后的PPT
+    prs.save(output_path)
+    print(f"修改完成，文件保存至：{output_path}")
+
+# ----------------使用示例----------------
+if __name__ == "__main__":
+    # 原PPT路径
+    input_file = "test.pptx"
+    # 输出修改后的PPT
+    output_file = "new_test.pptx"
+    
+    # 文本框需要包含的整体关键字
+    target_key = "订单编号：2025001"
+    # 需要替换的片段
+    old_text = "2025001"
+    new_text = "20260730"
+    
+    replace_text_in_pptx(input_file, target_key, old_text, new_text, output_file)
